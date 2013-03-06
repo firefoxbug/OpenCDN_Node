@@ -1,0 +1,356 @@
+#!/bin/bash
+
+# Hello boys and girls, Welcome to OpenCDN!
+# OpenCDN a open-source management platform, which can help you build node-hosts in 5 minutes.
+# The system consists of the Control Center(CC) and Node Host(NH). The CC can monitor a basic 
+# system information on each node, such as cpu usage and health status. CC also can collect logs 
+# of nginx from all node-hosts. You'd better reference to source code
+
+# author : firefoxbug
+# E-Mail : wanghuafire@gmail.com
+# Blog   : blog.csdn.net/firefoxbug
+
+## Check user permissions ##
+if [ $(id -u) != "0" ]; then
+  echo "Error: NO PERMISSION! Please login as root to install MAPn."
+  exit 1
+fi
+
+function killd_server()
+{
+	kill -9 `ps aux | grep "httpd" | awk "{print $2}"` > /dev/null 2>&1 
+	kill -9 `ps aux | grep "mysqld" | awk "{print $2}"`  > /dev/null 2>&1 
+	rm -rf /etc/localtime
+	ln -s /usr/share/zoneinfo/Asia/Shanghai /etc/localtime
+
+	yum install -y ntp
+	ntpdate -u pool.ntp.org
+	date
+
+	rpm -qa|grep  httpd
+	rpm -e httpd
+	rpm -qa|grep mysql
+	rpm -e mysql
+	rpm -qa|grep php
+	rpm -e php
+
+	yum -y remove httpd*
+	yum -y remove php*
+	yum -y remove mysql-server mysql
+	yum -y remove php-mysql
+
+	yum -y install yum-fastestmirror
+	yum -y remove httpd	
+}
+
+get_char()
+{
+	SAVEDSTTY=`stty -g`
+	stty -echo
+	stty cbreak
+	dd if=/dev/tty bs=1 count=1 2> /dev/null
+	stty -raw
+	stty echo
+	stty $SAVEDSTTY
+}
+
+function get_system_basic_info()
+{
+
+	echo "==========================OpenCDN===================================="
+	echo "*                                                                   *"
+	echo "*                                                                   *"
+	echo "*                     Welcome To OpenCDN                            *"
+	echo "*                                                                   *"
+	echo "*                                                                   *"
+	echo "==========================OpenCDN===================================="
+
+	echo ""
+	echo "Press any key to start install opencdn , please wait ......"
+	char=`get_char`
+
+	OpenCDN_Manage_IP=""
+	echo ""
+	echo -n "Now input IP of CDN Management : "
+	read OpenCDN_Manage_IP
+
+	IS_64=`uname -a | grep "x86_64"`
+	if [ -z "${IS_64}" ]
+	then
+	CPU_ARC="i386"
+	else
+	CPU_ARC="x86_64"
+	fi
+
+	IS_5=`cat /etc/redhat-release | grep "5.[0-9]"`
+	if [ -z "${IS_5}" ]
+	then
+	VER="6"
+	rpm_ver="epel-release-6-8.noarch.rpm"
+	sed -i "1 i\@version:3.2" syslog-ng.conf
+	else
+	VER="5"
+	rpm_ver="epel-release-5-4.noarch.rpm"
+	fi
+	setenforce 0
+	rpm -ivh "http://dl.fedoraproject.org/pub/epel/${VER}/${CPU_ARC}/${rpm_ver}"
+}
+
+get_system_basic_info
+
+killd_server
+
+OPENCDN_LOG_PATH="/var/log/opencdn"
+OLD_DIR=`pwd`
+
+mkdir -p ${OPENCDN_LOG_PATH}
+mkdir -p /etc/opencdn/
+mv ${OLD_DIR}/opencdn.conf /etc/opencdn/
+sed -i "s/localhost/$OpenCDN_Manage_IP/g" /etc/opencdn/opencdn.conf
+
+echo "===========================nginx install start===================================="
+sed -i 's/^exclude/#exclude/'  /etc/yum.conf && yum -y install gcc && sed -i 's/^#exclude/exclude/'  /etc/yum.conf
+
+# Install envirument
+yum -y install gcc gcc-c++ autoconf automake make
+yum -y install zlib zlib-devel openssl openssl--devel pcre pcre-devel
+yum -y install bc
+
+mv  ${OLD_DIR}/nginx.txt /tmp/
+mv -f  ${OLD_DIR}/conf /tmp/ 
+cd /tmp
+
+wget http://nginx.org/download/nginx-1.2.0.tar.gz
+if [ $? -eq 0 ]
+then
+	tar -zxvf nginx-1.2.0.tar.gz
+	rm -f nginx-1.2.0.tar.gz
+else
+	echo "Downloading http://nginx.org/download/nginx-1.2.0.tar.gz failured !!!"
+	exit 1
+fi 
+
+wget http://labs.frickle.com/files/ngx_cache_purge-1.6.tar.gz
+if [ $? -eq 0 ]
+then
+	tar -zxvf ngx_cache_purge-1.6.tar.gz
+	rm -f ngx_cache_purge-1.6.tar.gz
+else
+	echo "Downloading http://labs.frickle.com/files/ngx_cache_purge-1.3.tar.gz failured !!!"
+	exit 1
+fi 
+
+wget http://webserver.googlecode.com/files/pcre-8.10.tar.gz
+if [ $? -eq 0 ]
+then
+	tar -zxvf pcre-8.10.tar.gz
+	rm -f pcre-8.10.tar.gz
+else
+	echo "Downloading http://webserver.googlecode.com/files/pcre-8.10.tar.gz failured !!!"
+	exit 1
+fi 
+
+wget http://mingw-lib.googlecode.com/files/openssl-1.0.0c.tar.gz
+if [ $? -eq 0 ]
+then
+	tar -zxvf openssl-1.0.0c.tar.gz
+	rm -f openssl-1.0.0c.tar.gz
+else
+	echo "Downloading http://mingw-lib.googlecode.com/files/openssl-1.0.0c.tar.gz failured !!!"
+	exit 1
+fi 
+
+if [ "${CPU_ARC}" == "x86_64" ]
+then
+	wget http://fastlnmp.googlecode.com/files/libunwind-0.99-alpha.tar.gz
+	tar zxvf libunwind-0.99-alpha.tar.gz
+	cd libunwind-0.99-alpha/
+	CFLAGS=-fPIC ./configure
+	make CFLAGS=-fPIC
+	make CFLAGS=-fPIC install
+fi
+
+wget http://gperftools.googlecode.com/files/gperftools-2.0.tar.gz
+if [ $? -eq 0 ]
+then
+	tar -zxvf gperftools-2.0.tar.gz
+	rm -f gperftools-2.0.tar.gz
+else
+	echo "https://gperftools.googlecode.com/files/gperftools-2.0.tar.gz failured !!!"
+	exit 1
+fi 
+
+pushd gperftools-2.0
+./configure --prefix=/usr
+make&&make install
+popd
+
+echo "/usr/local/lib" > /etc/ld.so.conf.d/usr_local_lib.conf
+/sbin/ldconfig
+
+mkdir /tmp/tcmalloc
+chmod 0777 /tmp/tcmalloc
+
+mkdir /usr/local/nginx
+cd /usr/local/nginx
+
+## change file before compile
+sed -i 's/\"nginx/\"OpenCDN Beta/i' /tmp/nginx-1.2.0/src/core/nginx.hi
+sed 's/>nginx</>OpenCDN Beta</' -i /tmp/nginx-1.2.0/src/http/ngx_http_special_response.c
+sed -i 's/\" NGINX_VER \"/OpenCDN beta/' /tmp/ngx_cache_purge-1.6/ngx_cache_purge_module.c
+
+## complie nginx with new args
+groupadd www
+useradd -g www -s /bin/false -M www
+
+pushd /tmp/nginx-1.2.0
+./configure --user=www --group=www --prefix=/usr/local/nginx --with-pcre=../pcre-8.10 --with-openssl=../openssl-1.0.0c  --add-module=../ngx_cache_purge-1.6 --with-http_stub_status_module --with-http_ssl_module --with-http_gzip_static_module --without-mail_pop3_module     --without-mail_smtp_module     --without-mail_imap_module     --without-http_uwsgi_module     --without-http_scgi_module --with-google_perftools_module
+make && make install
+if [ $? -ne 0 ];then
+	echo "error"
+	exit 1
+fi 
+popd
+
+#set auto start scripts
+mv /tmp/nginx.txt /etc/init.d/nginx
+
+chmod u+x /etc/init.d/nginx
+
+rm -rf /usr/local/nginx/conf
+mv -f /tmp/conf /usr/local/nginx/
+
+chkconfig --add nginx
+chkconfig --level 345 nginx on
+chkconfig --list nginx
+
+#service nginx start
+## Create cache and temp
+mkdir /home/cache/
+#mkdir /home/logs/
+mkdir /home/temp/
+
+
+## Set the provilige of cache
+chown www.www -R /home/cache /home/temp
+chmod -R 777 /home/cache /home/temp
+
+access_log="/var/log/nginx/access.pipe"
+rm -f $access_log
+mkfifo ${access_log}
+if [ ! -p "${access_log}" ] 
+then
+	echo "create ${access_log} failured!!!"
+	exit 1;
+fi
+
+url_fifo="/home/node_url.pipe"
+rm -f $url_fifo
+mkfifo $url_fifo
+if [ ! -p "${url_fifo}" ] 
+then
+	echo "create ${url_fifo} failured!!!"
+	exit 1;
+fi
+
+sys_fifo="/home/sys_info.pipe"
+rm -f $sys_fifo
+mkfifo $sys_fifo
+if [ ! -p "${sys_fifo}" ] 
+then
+	echo "create ${sys_fifo} failured!!!"
+	exit 1;
+fi
+
+echo "===========================nginx install completed===================================="
+
+echo "===========================rsync install start========================================"
+
+yum -y remove rsync 
+yum -y install rsync 
+
+cd ${OLD_DIR}
+
+if [ ! -f "./inotify-tools-3.14.tar.gz" ]
+then
+	wget http://pkgs.fedoraproject.org/repo/pkgs/inotify-tools/inotify-tools-3.14.tar.gz/b43d95a0fa8c45f8bab3aec9672cf30c/inotify-tools-3.14.tar.gz
+fi
+
+tar zxvf inotify-tools-3.14.tar.gz
+rm -rf inotify-tools-3.14.tar.gz
+pushd inotify-tools-3.14
+./configure && make && make install
+popd
+
+ln -sv /usr/local/lib/libinotify* /usr/lib/
+ln -s /usr/local/lib/libinotifytools.so.0 /usr/lib64/libinotifytools.so.0
+
+echo "ocdn:ocdn.me" >/etc/rsyncd.pwd
+chmod 600 /etc/rsyncd.pwd
+
+USER=ocdn
+PASSWD=ocdn.me
+cd ${OLD_DIR}
+
+mv -f ${OLD_DIR}/rsyncd.conf  /etc/rsyncd.conf
+sed "s/0\.0\.0\.0/$OpenCDN_Manage_IP/g" -i /etc/rsyncd.conf
+
+#echo "/usr/bin/rsync --daemon" >> /etc/rc.d/rc.local
+
+echo "===========================rsync install completed===================================="
+
+mv /etc/init.d/iptables /etc/init.d/iptables.bak
+rm -f /etc/sysconfig/iptables
+rm -f /etc/init.d/iptables 
+mv -f ${OLD_DIR}/iptables_start /etc/init.d/iptables
+chmod u+x /etc/init.d/iptables
+mv -f ${OLD_DIR}/iptables.conf /etc/sysconfig/iptables
+service iptables restart
+
+mv -f ${OLD_DIR}/nginxmon  /usr/local/nginx/sbin/ -f
+
+chmod u+x /usr/local/nginx/sbin/nginxmon 
+echo "nohup /bin/bash /usr/local/nginx/sbin/nginxmon > /var/log/nginxmon.log 2>&1 &" >> /etc/rc.d/rc.local
+nohup /bin/bash /usr/local/nginx/sbin/nginxmon &> /var/log/nginxmon.log 2>&1 &
+
+mv -f ${OLD_DIR}/search_url /usr/local/nginx/sbin
+chmod u+x /usr/local/nginx/sbin/search_url
+
+mv -f ${OLD_DIR}/send_info /usr/local/nginx/sbin
+chmod u+x /usr/local/nginx/sbin/send_info
+
+echo "===========================syslog install start===================================="
+
+yum -y remove syslog-ng
+yum -y remove syslog*
+yum -y install syslog-ng
+cd ${OLD_DIR}
+mv /etc/syslog-ng/syslog-ng.conf /etc/syslog-ng/syslog-ng.conf.bak
+ 
+sed -i "s/0\.0\.0\.0/$OpenCDN_Manage_IP/g" syslog-ng.conf
+mv -f ${OLD_DIR}/syslog-ng.conf /etc/syslog-ng/syslog-ng.conf
+chkconfig syslog-ng on
+service syslog-ng start > /dev/null 2>&1
+service nginx start
+
+echo "===========================syslog install completed===================================="
+
+chmod 777 ${OLD_DIR}/opencdn
+mv -f ${OLD_DIR}/opencdn /etc/init.d/
+chkconfig --add opencdn
+service opencdn restart 
+
+echo "==========================OpenCDN===================================="
+echo "*                                                                   *"
+echo "*service opencdn [start|stop|restart|status]                        *"
+echo "*cache log path    : ${OPENCDN_LOG_PATH}/search_url.log               *"
+echo "*sys_info log path : ${OPENCDN_LOG_PATH}/send_info.log                *"
+echo "*                                                                   *"
+echo "==========================OpenCDN===================================="
+
+## Clean source file
+cd /tmp
+rm -rf gperftools-2.0 nginx-1.2.0 ngx_cache_purge-1.6 openssl-1.0.0c pcre-8.10 nginx.txt *.tar.gz inotify-tools-3.14 ${OLD_DIR}/ocdn_node/
+
+cd ${OLD_DIR}
+rm -rf inotify-tools* iptables install.sh

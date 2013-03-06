@@ -1,0 +1,41 @@
+#!/bin/bash
+#author : firefoxbug
+
+url_fifo="/home/node_url.pipe"
+#rm -f $url_fifo
+#mkfifo $url_fifo
+if [ ! -p "$url_fifo" ];then
+    mkfifo $url_fifo
+    service syslog-ng restart
+fi
+exec 8<>$url_fifo
+
+cache_path="/home/cache"
+
+function search_url()
+{
+        URL=`sed -n '/^KEY/p' $1 | awk -F : '{print $2}'`
+#       echo "$URL"
+        echo "$URL" | awk -F / '{$1="http: "$1" purge";print}' | sed 's/ /\//g' >&8
+}
+
+function scandir(){
+    for filename in `ls $1`
+    do
+        if [ -d $1'/'$filename ] ; then
+             scandir $1'/'$filename
+        else
+             search_url $1'/'$filename
+        fi
+    done
+}
+
+while :
+do
+    if [ ! -d "$cache_path" ]
+    then
+        mkdir "$cache_path"
+    fi
+    scandir $cache_path
+    sleep 300
+done

@@ -1,0 +1,359 @@
+#!/bin/bash
+#author : firefoxbug
+
+i=0
+timer=2
+sys_fifo="/home/sys_info.pipe"
+
+exec 7<>$sys_fifo
+
+TABLENAME0="node_info"
+
+function net_initial()
+{
+	send_old[$k]=`ifconfig ${eth[$k]} | grep bytes | awk -F "[:()]" '{print $5}'`
+	recv_old[$k]=`ifconfig ${eth[$k]} | grep bytes | awk -F "[:()]" '{print $2}'`
+	send_new[$k]=${send_old[$k]}
+	recv_new[$k]=${recv_old[$k]}
+	device[$k]="${eth[$k]}"
+	onboot[$k]="yes"
+	ip[$k]="0.0.0.0"
+	netmask[$k]="0.0.0.0"
+}
+
+function get_eth_info()
+{
+	eth[0]=""
+	eth[1]=""
+	eth_device="/etc/sysconfig/network-scripts/"
+	k=0
+
+	cat /proc/net/dev | sed -n '3,$p' > ./eth_info.txt
+	while read line
+	do
+		eth[$k]=`echo "$line" | awk -F : '{print $1}' | sed "s/ //g"`
+		if [ "${eth[$k]}" == "lo" ]
+		then
+			eth[$k]=""
+			continue
+		fi
+		net_initial
+#		echo "${eth[$k]}"
+		let k++
+	done < ./eth_info.txt
+	rm -f ./eth_info.txt
+}
+
+
+# system basic information which unchanged
+function system_basic_info()
+{
+	#Kernel information
+	System_release=`cat /etc/redhat-release`
+	Kernel_release=`uname -a|awk '{print $1,$3}'` 
+	echo "System_release : $System_release Kernel_release : $Kernel_release"
+	#cpu information
+	Frequency=`cat /proc/cpuinfo | grep "model name" | uniq |awk -F': ' '{print $2}'`
+	CPU_cores=`cat /proc/cpuinfo | grep "cpu cores" | uniq |awk -F': ' '{print $2}'`
+
+	eval $(free -m | sed -n '3D;2p' | awk '{printf("Mem_total=%s\nMem_used=%s\nMem_free=%s\n",\
+$2,$3,$4)}')
+	eval $(free -m | sed -n '3D;4p' | awk '{printf("Swap_total=%s\nSwap_used=%s\nSwap_free=%s\n",\
+$2,$3,$4)}')
+
+	eval $(df -h | sed -n '2p' | awk '{printf("Disk_total=%s\n",$2)}')
+	[ -z "${Disk_used}" ] && eval $(df -h | sed -n '3p' | awk '{printf("Disk_total=%s\n",$1)}')
+
+	if [ ! -z "${eth[0]}" ]
+	then
+		eth_config0="/etc/sysconfig/network-scripts/ifcfg-${eth[0]}"
+		if [ -f "$eth_config0" ]
+		then
+			ip[0]=`sed -n '/IPADDR/p' ${eth_config0} | awk -F = '{print $2}' | tr '\"' ' ' | sed 's/ //g'`
+			netmask[0]=`sed -n '/NETMASK/p' ${eth_config0} | awk -F = '{print $2}' | tr '\"' ' ' | sed 's/ //g'`
+		else
+			ip[0]=`ifconfig ${eth[0]} | grep "inet addr:" | awk -F : '{print $2}' | awk '{print $1}'`
+			netmask[0]=`ifconfig ${eth[0]} | grep "Mask" | awk -F : '{print $4}'`
+		fi
+	fi
+	echo "IP : ${ip[0]}  NETMASK : ${netmask[0]}"
+	
+	if [ ! -z "${eth[1]}" ]
+	then
+		eth_config1="/etc/sysconfig/network-scripts/ifcfg-${eth[1]}"
+		if [ -f "$eth_config1" ]
+		then
+			ip[1]=`sed -n '/IPADDR/p' ${eth_config1} | awk -F = '{print $2}' | tr '\"' ' ' | sed 's/ //g'`
+			netmask[1]=`sed -n '/NETMASK/p' ${eth_config1} | awk -F = '{print $2}' | tr '\"' ' ' | sed 's/ //g'`
+		else
+			ip[1]=`ifconfig ${eth[1]} | grep "inet addr:" | awk -F : '{print $2}' | awk '{print $1}'`
+			netmask[1]=`ifconfig ${eth[1]} | grep "Mask" | awk -F : '{print $4}'`
+		fi
+	fi
+	echo "IP : ${ip[1]}  NETMASK : ${netmask[1]}"
+}
+
+# Flow information statistics
+function flow_info()
+{
+	j="$1"
+	eth_name="${eth[$j]}"
+
+	send_tmp[$j]=${send_new[$j]}
+	recv_tmp[$j]=${recv_new[$j]}
+	send_new[$j]=`ifconfig $eth_name | grep bytes | awk -F "[:()]" '{print $5}'`
+	recv_new[$j]=`ifconfig $eth_name | grep bytes | awk -F "[:()]" '{print $2}'`
+
+	#last one minute rate of eth (bytes/s)
+#	echo "last minutes : send ${send_new[$j]} recv ${recv_new[$j]}"
+	#       echo "all minutes : send ${send_old[$j]} recv ${recv_old[$j]}"
+	send_last[$j]=`echo "scale=2;(${send_new[$j]} - ${send_tmp[$j]}) / $timer" | bc`
+	recv_last[$j]=`echo "scale=2;(${recv_new[$j]} - ${recv_tmp[$j]}) / $timer" | bc`
+
+	#all rate of eth ( byte/s )
+	send_total_rate[$j]=`echo "${send_new[$j]} - ${send_old[$j]}" | bc`
+	recv_total_rate[$j]=`echo "${recv_new[$j]} - ${recv_old[$j]}" | bc`
+
+	re1=`echo "${send_last[$j]} > 1024" | bc`
+	if [[ $re1 -eq 1 ]]; then
+		send_last[$j]=`echo "scale=2;${send_last[$j]} / 1024" | bc`
+		send_last[$j]="${send_last[$j]} K/s"
+	else
+		send_last[$j]="${send_last[$j]} B/s"	
+	fi
+
+	re2=`echo "${recv_last[$j]} > 1024" | bc`
+	if [[ $re2 -eq 1 ]]; then
+		recv_last[$j]=`echo "scale=2;${recv_last[$j]} / 1024" | bc`
+		recv_last[$j]="${recv_last[$j]} K/s"
+	else
+		recv_last[$j]="${recv_last[$j]} B/s"	
+	fi
+
+	re3=`echo "${send_total_rate[$j]} > 1024" | bc`
+	if [[ $re3 -eq 1 ]]; then
+		send_total_rate[$j]=`echo "scale=2;${send_total_rate[$j]} / 1024" | bc`
+		re3=`echo "${send_total_rate[$j]} > 1024" | bc`
+		if [[ $re3 -eq 1 ]]; then
+			send_total_rate[$j]=`echo "scale=2;${send_total_rate[$j]} / 1024" | bc`
+				re3=`echo "${send_total_rate[$j]} > 1024" | bc`
+				if [[ $re3 -eq 1 ]]; then
+					send_total_rate[$j]=`echo "scale=2;${send_total_rate[$j]} / 1024" | bc`
+					send_total_rate[$j]="${send_total_rate[$j]} G"
+				else
+					send_total_rate[$j]="${send_total_rate[$j]} M"	
+				fi
+		else
+			send_total_rate[$j]="${send_total_rate[$j]} k"	
+		fi
+	else
+		send_total_rate[$j]="${send_total_rate[$j]} B"	
+	fi
+
+	re4=`echo "${recv_total_rate[$j]} > 1024" | bc`
+	if [[ $re4 -eq 1 ]]; then
+		recv_total_rate[$j]=`echo "scale=2;${recv_total_rate[$j]} / 1024" | bc`
+		re4=`echo "${recv_total_rate[$j]} > 1024" | bc`
+		if [[ $re4 -eq 1 ]]; then
+			recv_total_rate[$j]=`echo "scale=2;${recv_total_rate[$j]} / 1024" | bc`
+				re4=`echo "${recv_total_rate[$j]} > 1024" | bc`
+				if [[ $re4 -eq 1 ]]; then
+					recv_total_rate[$j]=`echo "scale=2;${recv_total_rate[$j]} / 1024" | bc`
+					recv_total_rate[$j]="${recv_total_rate[$j]} G"
+				else
+					recv_total_rate[$j]="${recv_total_rate[$j]} M"	
+				fi
+		else
+			recv_total_rate[$j]="${recv_total_rate[$j]} k"	
+		fi
+	else
+		recv_total_rate[$j]="${recv_total_rate[$j]} B"	
+	fi
+	echo "last minutes : send ${send_last[$j]} recv ${recv_last[$j]}"
+	echo "all minutes : send ${send_total_rate[$j]} recv ${recv_total_rate[$j]}"
+}
+
+function mysql_update(){
+        update_sql="update ${TABLENAME0} set \
+IP0=\"${ip[0]}\",Netmask0=\"${netmask[0]}\",\
+IP1=\"${ip[1]}\",Netmask1=\"${netmask[1]}\",\
+System_release=\"$System_release\",Kernel_release=\"$Kernel_release\",\
+Frequency=\"$Frequency\",CPU_cores=\"$CPU_cores\",\
+Mem_total=\"${Mem_total}M\",\
+Swap_total=\"${Swap_total}M\",\
+Disk_total=\"${Disk_total}\",\
+cpu=\"${SYS_Rate}%\",cpu_free=\"${SYS_USAGE}%\",\
+eth0=\"${onboot[0]}\",send_rate0=\"${send_last[0]}\",recv_rate0=\"${recv_last[0]}\",send_all_rate0=\"${send_total_rate[0]}\",recv_all_rate0=\"${recv_total_rate[0]}\",\
+eth1=\"${onboot[1]}\",send_rate1=\"${send_last[1]}\",recv_rate1=\"${recv_last[1]}\",send_all_rate1=\"${send_total_rate[1]}\",recv_all_rate1=\"${recv_total_rate[1]}\",\
+Mem_used=\"${Mem_used}M\",Mem_free=\"${Mem_free}M\",Mem_per=\"$Mem_per\",\
+Swap_used=\"${Swap_used}M\",Swap_free=\"${Swap_free}M\",Swap_per=\"$Swap_per\",\
+Disk_used=\"${Disk_used}\",Disk_free=\"${Disk_free}\",Disk_per=\"$Disk_per\",cache=\"$cache\""
+	echo "$update_sql"
+	echo "$update_sql"  >&7
+}
+
+function system_change_info()
+{
+	CPU_2=$(cat /proc/stat | grep 'cpu ' | awk '{print $2" "$3" "$4" "$5" "$6" "$7" "$8}') 
+	SYS_IDLE_2=$(echo $CPU_2 | awk '{print $4}') 
+	Total_2=$(echo $CPU_2 | awk '{printf "%.f",$1+$2+$3+$4+$5+$6+$7}') 
+	SYS_IDLE=`expr $SYS_IDLE_2 - $SYS_IDLE_1` 
+	Total=`expr $Total_2 - $Total01` 
+	TT=`expr $SYS_IDLE \* 100` 
+	SYS_USAGE=`expr $TT / $Total` 
+	SYS_Rate=`expr 100 - $SYS_USAGE` 
+	#memory information
+	# 			    total       used       free     shared    buffers     cached
+	#Mem:           503        373        129          0         88        191
+	#-/+ buffers/cache:         93        409
+	#Swap:            0          0          0
+	eval $(free -m | sed -n '3D;2p' | awk '{printf("Mem_used=%s\nMem_free=%s\n",\
+$3,$4)}')
+	eval $(free -m | sed -n '3D;4p' | awk '{printf("Swap_used=%s\nSwap_free=%s\n",\
+$3,$4)}')
+
+	#disk information
+	#Filesystem      Size  Used Avail Use% Mounted on
+	#rootfs           87G   22G   62G  26% /
+	Disk_name=`head -1 /etc/mtab`
+	eval $(df -h | sed -n '2p' | awk '{printf("Disk_used=%s\nDisk_free=%s\nDisk_per=%s\n",\
+$3,$4,$5)}')
+	if [ -z "${Disk_used}" ]
+	then
+		eval $(df -h | sed -n '3p' | awk '{printf("Disk_used=%s\nDisk_free=%s\nDisk_per=%s\n",\
+$2,$3,$4)}')	
+	fi
+	Mem_per=`echo "scale=2;(${Mem_used} / ${Mem_total}) * 100 " | bc | awk -F . '{print $1}'`"%"
+	if [ $Swap_total -eq 0 ];then
+		Swap_per="0%"
+	else
+		Swap_per=`echo "scale=2;(${Swap_used} / ${Swap_total}) * 100" | bc | awk -F . '{print $1}'`"%"
+	fi
+#	cpu = "top -b -n 1 | grep Cpu|awk -F \"[:,%]\" '{print $2}'"
+	cache=`du -h --max-depth=1 /home/ | grep "/home/cache" | awk '{print $1}'`
+	echo "cache : $cache"
+	echo "CPU : $SYS_Rate $SYS_USAGE "
+	echo "Frequency : $Frequency  CPU_cores : $CPU_cores"
+	echo "Mem_total : $Mem_total Mem_used : $Mem_used Mem_free : $Mem_free  Mem_per : $Mem_per"
+	echo "Swap_total : $Swap_total Swap_used : $Swap_used Swap_free : $Swap_free Swap_per : $Swap_per"
+	echo "Disk_total : $Disk_total Disk_used : $Disk_used Disk_free : $Disk_free Disk_per : $Disk_per"	
+}
+
+function main_initial()
+{
+#	net_initial
+	sleep $timer
+	i=`expr $i + 2`
+	#system information
+	system_basic_info
+
+	#network information
+	if [ ! -z "${eth[0]}" ]
+	then		
+		eth_name0=${eth[0]}
+		if [ ! -z "$eth_name0" ];then
+				echo $eth_name0
+				onboot[0]="yes"
+				is_eth_on=`ifconfig $eth_name0 | grep bytes`
+				if [ ! -z "$is_eth_on" ]
+				then
+					flow_info 0
+				fi
+		else
+				onboot[0]="no"
+		fi
+	else
+		onboot[0]="no"
+	fi
+
+	if [ ! -z "${eth[1]}" ]
+	then	
+		eth_name1=${eth[1]}
+		if [ ! -z "$eth_name1" ];then
+				echo $eth_name1
+				onboot[1]="yes"
+				is_eth_on=`ifconfig $eth_name1 | grep bytes`
+				if [ ! -z "$is_eth_on" ]
+				then
+					flow_info 1
+				fi
+		else
+				onboot[1]="no"
+		fi
+	else
+		onboot[1]="no"
+	fi
+}
+
+function main_start()
+{
+	CPU_1=$(cat /proc/stat | grep 'cpu ' | awk '{print $2" "$3" "$4" "$5" "$6" "$7" "$8}')
+	SYS_IDLE_1=$(echo $CPU_1 | awk '{print $4}')
+	Total01=$(echo $CPU_1 | awk '{printf "%.f",$1+$2+$3+$4+$5+$6+$7}')
+	i=`expr $i + 2`
+	sleep $timer
+
+	#network information
+#	eth_name0=`netstat -i | grep "^${eth[0]}" | awk '{print $1}'`
+	eth_name0=${eth[0]}
+	if [ ! -z "$eth_name0" ]
+	then
+		if [ ! -z "$eth_name0" ];then
+				echo $eth_name0
+				onboot[0]="yes"
+				is_eth_on=`ifconfig $eth_name0 | grep bytes`
+				if [ ! -z "$is_eth_on" ]
+				then
+					flow_info 0
+				fi
+		else
+				onboot[0]="no"
+				send_old[0]=0
+				recv_old[0]=0
+				send_new[0]=${send_old[0]}
+				recv_new[0]=${recv_old[0]}
+		fi
+	else
+				onboot[0]="no"
+				send_old[0]=0
+				recv_old[0]=0
+				send_new[0]=${send_old[0]}
+				recv_new[0]=${recv_old[0]}
+	fi
+	if [ ! -z "$eth_name1" ]
+	then
+		eth_name1=${eth[1]}
+		if [ ! -z "$eth_name1" ];then
+				echo $eth_name1
+				onboot[1]="yes"
+				is_eth_on=`ifconfig $eth_name1 | grep bytes`
+				if [ ! -z "$is_eth_on" ]
+				then
+					flow_info 1
+				fi
+		else
+				onboot[1]="no"
+				send_old[1]=0
+				recv_old[1]=0
+				send_new[1]=${send_old[1]}
+				recv_new[1]=${recv_old[1]}
+		fi
+	else
+				onboot[1]="no"
+				send_old[1]=0
+				recv_old[1]=0
+				send_new[1]=${send_old[1]}
+				recv_new[1]=${recv_old[1]}
+	fi
+	system_change_info
+	mysql_update
+}
+
+get_eth_info
+# main function initial basic environment
+main_initial
+
+while :
+do
+	main_start
+done

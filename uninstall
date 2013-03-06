@@ -1,0 +1,64 @@
+#!/bin/bash
+#opencdn unistall
+#author : firefoxbug
+
+user="`whoami`"
+if [ "$user" != "root" ];then
+	echo "execute $0 with root !!! "
+	exit 0;
+fi
+
+echo "==========================OpenCDN===================================="
+echo "*                                                                   *"
+echo "*                                                                   *"
+echo "*                     Welcome To OpenCDN                            *"
+echo "*                                                                   *"
+echo "*                                                                   *"
+echo "==========================OpenCDN===================================="
+
+get_char()
+{
+	SAVEDSTTY=`stty -g`
+	stty -echo
+	stty cbreak
+	dd if=/dev/tty bs=1 count=1 2> /dev/null
+	stty -raw
+	stty echo
+	stty $SAVEDSTTY
+}
+
+echo ""
+echo "Press any key to start install opencdn , please wait ......"
+char=`get_char`
+
+service opencdn stop
+chkconfig --del opencdn
+rm -rf /etc/opencdn/
+crontab -r 
+
+service nginx stop
+#remove nginx
+echo "remove nginx"
+chkconfig --del nginx
+rm -rf  /tmp/tcmalloc /usr/local/nginx /etc/init.d/nginx /home/cache /home/temp
+rm -f /var/log/nginxmon.log
+
+echo "remove rsync"
+yum -y remove rsync 
+rm -rf /etc/rsyncd.conf
+rm -f /etc/rsyncd.pwd
+rm -rf /usr/bin/rsync
+
+kill -9 `ps aux | grep "nginxmon" | awk '{print $2}'`
+kill -9 `ps aux | grep "search_url" | awk '{print $2}'` 
+kill -9 `ps aux | grep "send_info" | awk '{print $2}'`
+kill -9 `ps aux | grep "inotifywait" | awk '{print $2}'`
+sed -i '/\/usr\/local\/nginx\/sbin\/nginxmon.sh/D' /etc/rc.local
+sed -i '/search_url/D' /etc/rc.local
+sed -i '/send_info/D' /etc/rc.local
+
+#remove syslog
+yum -y remove syslog-ng
+rm -rf /etc/syslog-ng/
+
+rm -f /home/sys_info.pipe /home/node_url.pipe
