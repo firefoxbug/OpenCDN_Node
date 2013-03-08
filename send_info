@@ -3,7 +3,7 @@
 
 i=0
 timer=2
-sys_fifo="/home/sys_info.pipe"
+sys_fifo="/usr/local/opencdn/pipe/sys_info.pipe"
 
 exec 7<>$sys_fifo
 

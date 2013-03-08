@@ -101,17 +101,42 @@ get_system_basic_info
 killd_server
 
 OPENCDN_LOG_PATH="/var/log/opencdn"
-OLD_DIR=`pwd`
+OPENCDN_EXEC_PATH="/usr/local/opencdn/sbin"
+OPENCDN_CONF_PATH="/usr/local/opencdn/conf"
+OPENCDN_PIPE_PATH="/usr/local/opencdn/pipe"
+OPENCDN_CONF_FILE="/usr/local/opencdn/conf/opencdn.conf"
 
 mkdir -p ${OPENCDN_LOG_PATH}
-mkdir -p /etc/opencdn/
-mv ${OLD_DIR}/opencdn.conf /etc/opencdn/
-sed -i "s/localhost/$OpenCDN_Manage_IP/g" /etc/opencdn/opencdn.conf
+mkdir -p ${OPENCDN_EXEC_PATH}
+mkdir -p ${OPENCDN_CONF_PATH}
+mkdir -p ${OPENCDN_PIPE_PATH}
+
+access_log="${OPENCDN_PIPE_PATH}/access.pipe"
+rm -f $access_log
+mkfifo ${access_log}
+if [ ! -p "${access_log}" ] 
+then
+	echo "create ${access_log} failured!!!"
+	exit 1;
+fi
+
+sys_fifo="${OPENCDN_PIPE_PATH}/sys_info.pipe"
+rm -f $sys_fifo
+mkfifo $sys_fifo
+if [ ! -p "${sys_fifo}" ] 
+then
+	echo "create ${sys_fifo} failured!!!"
+	exit 1;
+fi
+
+mv ${OLD_DIR}/opencdn.conf ${OPENCDN_CONF_PATH}
+
+OLD_DIR=`pwd`
+sed -i "s/localhost/$OpenCDN_Manage_IP/g" ${OPENCDN_CONF_PATH}/opencdn.conf
 
 echo "===========================nginx install start===================================="
 sed -i 's/^exclude/#exclude/'  /etc/yum.conf && yum -y install gcc && sed -i 's/^#exclude/exclude/'  /etc/yum.conf
 
-# Install envirument
 yum -y install gcc gcc-c++ autoconf automake make
 yum -y install zlib zlib-devel openssl openssl--devel pcre pcre-devel
 yum -y install bc
@@ -235,33 +260,6 @@ mkdir /home/temp/
 chown www.www -R /home/cache /home/temp
 chmod -R 777 /home/cache /home/temp
 
-access_log="/var/log/nginx/access.pipe"
-rm -f $access_log
-mkfifo ${access_log}
-if [ ! -p "${access_log}" ] 
-then
-	echo "create ${access_log} failured!!!"
-	exit 1;
-fi
-
-url_fifo="/home/node_url.pipe"
-rm -f $url_fifo
-mkfifo $url_fifo
-if [ ! -p "${url_fifo}" ] 
-then
-	echo "create ${url_fifo} failured!!!"
-	exit 1;
-fi
-
-sys_fifo="/home/sys_info.pipe"
-rm -f $sys_fifo
-mkfifo $sys_fifo
-if [ ! -p "${sys_fifo}" ] 
-then
-	echo "create ${sys_fifo} failured!!!"
-	exit 1;
-fi
-
 echo "===========================nginx install completed===================================="
 
 echo "===========================rsync install start========================================"
@@ -310,14 +308,11 @@ service iptables restart
 mv -f ${OLD_DIR}/nginxmon  /usr/local/nginx/sbin/ -f
 
 chmod u+x /usr/local/nginx/sbin/nginxmon 
-echo "nohup /bin/bash /usr/local/nginx/sbin/nginxmon > /var/log/nginxmon.log 2>&1 &" >> /etc/rc.d/rc.local
-nohup /bin/bash /usr/local/nginx/sbin/nginxmon &> /var/log/nginxmon.log 2>&1 &
+echo "nohup /bin/bash /usr/local/nginx/sbin/nginxmon > ${OPENCDN_LOG_PATH}/nginxmon.log 2>&1 &" >> /etc/rc.d/rc.local
+nohup /bin/bash /usr/local/nginx/sbin/nginxmon &> ${OPENCDN_LOG_PATH}/nginxmon.log 2>&1 &
 
-mv -f ${OLD_DIR}/search_url /usr/local/nginx/sbin
-chmod u+x /usr/local/nginx/sbin/search_url
-
-mv -f ${OLD_DIR}/send_info /usr/local/nginx/sbin
-chmod u+x /usr/local/nginx/sbin/send_info
+mv -f ${OLD_DIR}/send_info ${OPENCDN_EXEC_PATH}
+chmod u+x ${OPENCDN_EXEC_PATH}/send_info
 
 echo "===========================syslog install start===================================="
 
@@ -343,8 +338,7 @@ service opencdn restart
 echo "==========================OpenCDN===================================="
 echo "*                                                                   *"
 echo "*service opencdn [start|stop|restart|status]                        *"
-echo "*cache log path    : ${OPENCDN_LOG_PATH}/search_url.log               *"
-echo "*sys_info log path : ${OPENCDN_LOG_PATH}/send_info.log                *"
+echo "*sys_info log path : /var/log/opencdn/send_info.log                 *"
 echo "*                                                                   *"
 echo "==========================OpenCDN===================================="
 

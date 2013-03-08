@@ -3,22 +3,21 @@
 #description: opencdn
 #chkconfig: 2345 20 81
 
-EXEC_PATH=/usr/local/nginx/sbin
 EXEC="opencdn"
-EXEC_CACHE="search_url"
 EXEC_INFO="send_info"
 PID_FILE="/var/run/$EXEC.pid"
 OPENCDN_LOG_PATH="/var/log/opencdn"
+OPENCDN_EXEC_PATH="/usr/local/opencdn/sbin"
+OPENCDN_CONF_FILE="/usr/local/opencdn/conf/opencdn.conf"
 
 . /etc/rc.d/init.d/functions
 
-[ -x $EXEC_PATH/$EXEC_INFO ] || echo "ERROR: $EXEC_INFO not found"
-[ -x $EXEC_PATH/$EXEC_CACHE ] || echo "ERROR: $EXEC_CACHE not found"
+[ -x ${OPENCDN_EXEC_PATH}/$EXEC_INFO ] || echo "ERROR: $EXEC_INFO not found"
 [ -f "$PID_FILE" ] || touch $PID_FILE
 
 function change_console_ip()
 {
-	new_console_ip=`cat /etc/opencdn/opencdn.conf | grep "Console_IP" | awk -F = '{print $2}'`
+	new_console_ip=`cat ${OPENCDN_CONF_FILE} | grep "Console_IP" | awk -F = '{print $2}'`
 	[ ! -z "${new_console_ip}" ] || return 1
 
 	#change console IP of rsync
@@ -40,7 +39,6 @@ stop()
 {
 		echo "Stoping $EXEC ..."
 		ps aux | grep "$EXEC_INFO" | kill -9 `awk '{print $2}'` >/dev/null 2>&1
-		ps aux | grep "$EXEC_CACHE" | kill -9 `awk '{print $2}'` >/dev/null 2>&1
 
 		kill -9 `ps aux | grep 'rsync' | awk '{print $2}'` > /dev/null 2>&1
 		service syslog-ng stop
@@ -61,8 +59,7 @@ start()
 		/usr/bin/rsync --daemon 
 		service syslog-ng start
 
-		nohup /bin/bash /usr/local/nginx/sbin/search_url >> ${OPENCDN_LOG_PATH}/search_url.log 2>&1 &
-		nohup /bin/bash /usr/local/nginx/sbin/send_info >> ${OPENCDN_LOG_PATH}/send_info.log 2>&1 &
+		nohup /bin/bash ${OPENCDN_EXEC_PATH}/send_info >> ${OPENCDN_LOG_PATH}/send_info.log 2>&1 &
 		echo "running" > $PID_FILE
 		usleep 100
 		echo "Starting $EXEC: [  OK  ]"        
