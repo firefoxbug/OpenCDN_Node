@@ -1,0 +1,30 @@
+/usr/local/opencdn
+.
+├── conf
+│   ├── opencdn.conf  node端配置文件
+├── nginx  nginx 主目录
+│   ├── a.txt
+│   ├── b.txt
+│   ├── errorpage
+│   │   └── 500.html
+│   ├── koi-utf
+│   ├── koi-win
+│   ├── mime.types
+│   ├── nginx.conf
+│   ├── proxy_pass.conf
+│   ├── vhost
+│   │   ├── ocdn-template.conf
+│   │   └── paoxue_com.conf
+│   └── win-utf
+├── pipe  管道文件
+│   ├── access.pipe
+│   └── sys_info.pipe
+├── sbin 
+│   ├── nginxmon 
+│   └── send_info 发送系统信息
+└──
+
+
+/etc/syslog-ng/
+.
+`-- syslog-ng.conf
